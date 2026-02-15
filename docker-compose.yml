@@ -1,0 +1,36 @@
+services:
+  mariadb:
+    image: mariadb:11.6
+    container_name: dgs-mariadb
+    environment:
+      MARIADB_DATABASE: deliveries
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  delivery-gateway-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: delivery-gateway-service
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_NAME: deliveries
+      DB_USER: root
+      DB_PASSWORD: ""
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+volumes:
+  mariadb_data:

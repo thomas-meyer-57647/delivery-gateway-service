@@ -3,8 +3,11 @@ package de.innologic.delivery.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.innologic.delivery.domain.DeliveryStatus;
+import de.innologic.delivery.domain.WalletLedgerType;
 import de.innologic.delivery.persistence.DeliveryAttemptRepository;
 import de.innologic.delivery.persistence.DeliveryEventRepository;
+import de.innologic.delivery.persistence.TenantWalletRepository;
+import de.innologic.delivery.persistence.WalletLedgerRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -88,8 +91,16 @@ class DeliveryApiIntegrationTest {
     @Autowired
     private DeliveryEventRepository deliveryEventRepository;
 
+    @Autowired
+    private TenantWalletRepository tenantWalletRepository;
+
+    @Autowired
+    private WalletLedgerRepository walletLedgerRepository;
+
     @AfterEach
     void cleanup() {
+        walletLedgerRepository.deleteAll();
+        tenantWalletRepository.deleteAll();
         deliveryEventRepository.deleteAll();
         deliveryAttemptRepository.deleteAll();
     }
@@ -324,6 +335,130 @@ class DeliveryApiIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidJson))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void walletTopupThenSmsDeductsCredits() throws Exception {
+        mockMvc.perform(post("/api/v1/wallet/topups")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":5}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyId").value("company-a"))
+                .andExpect(jsonPath("$.balance").value(5));
+
+        String attemptId = "att-" + UUID.randomUUID();
+        String smsRequest = """
+                {
+                  "attemptId": "%s",
+                  "channel": "SMS",
+                  "to": "+491700000001;+491700000002",
+                  "content": {
+                    "text": "Credit test"
+                  }
+                }
+                """.formatted(attemptId);
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(smsRequest))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(get("/api/v1/wallet")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(3));
+
+        assertThat(walletLedgerRepository.countByCompanyIdAndAttemptIdAndType("company-a", attemptId, WalletLedgerType.DEBIT))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void smsWithoutCreditsReturnsConflict() throws Exception {
+        String smsRequest = """
+                {
+                  "attemptId": "att-credit-0",
+                  "channel": "SMS",
+                  "to": "+491700000003",
+                  "content": {
+                    "text": "No credits"
+                  }
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(smsRequest))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("INSUFFICIENT_CREDITS"));
+    }
+
+    @Test
+    void idempotentDeliveryOnlyDebitsOnce() throws Exception {
+        mockMvc.perform(post("/api/v1/wallet/topups")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":5}"))
+                .andExpect(status().isOk());
+
+        String attemptId = "att-" + UUID.randomUUID();
+        String smsRequest = """
+                {
+                  "attemptId": "%s",
+                  "channel": "SMS",
+                  "to": "+491700000010",
+                  "content": {
+                    "text": "Idempotent credit"
+                  }
+                }
+                """.formatted(attemptId);
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(smsRequest))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(smsRequest))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(get("/api/v1/wallet")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(4));
+
+        assertThat(walletLedgerRepository.countByCompanyIdAndAttemptIdAndType("company-a", attemptId, WalletLedgerType.DEBIT))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void walletIsolatedPerTenant() throws Exception {
+        mockMvc.perform(post("/api/v1/wallet/topups")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":5}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/wallet/topups")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-b")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":3}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/wallet")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(5));
+
+        mockMvc.perform(get("/api/v1/wallet")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-b"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(3));
     }
 
 

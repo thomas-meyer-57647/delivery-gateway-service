@@ -8,6 +8,7 @@ import de.innologic.delivery.api.dto.DeliveryEventResponse;
 import de.innologic.delivery.api.dto.DeliveryReceipt;
 import de.innologic.delivery.api.dto.DeliveryRequest;
 import de.innologic.delivery.api.dto.ProviderEventRequest;
+import de.innologic.delivery.config.CreditsProperties;
 import de.innologic.delivery.common.error.BadRequestException;
 import de.innologic.delivery.common.error.DeliveryNotFoundException;
 import de.innologic.delivery.domain.Channel;
@@ -39,15 +40,21 @@ public class DeliveryApplicationService {
     private final DeliveryEventRepository deliveryEventRepository;
     private final DeliveryEventForwarder deliveryEventForwarder;
     private final ObjectMapper objectMapper;
+    private final WalletService walletService;
+    private final CreditsProperties creditsProperties;
 
     public DeliveryApplicationService(DeliveryAttemptRepository deliveryAttemptRepository,
                                       DeliveryEventRepository deliveryEventRepository,
                                       DeliveryEventForwarder deliveryEventForwarder,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      WalletService walletService,
+                                      CreditsProperties creditsProperties) {
         this.deliveryAttemptRepository = deliveryAttemptRepository;
         this.deliveryEventRepository = deliveryEventRepository;
         this.deliveryEventForwarder = deliveryEventForwarder;
         this.objectMapper = objectMapper;
+        this.walletService = walletService;
+        this.creditsProperties = creditsProperties;
     }
 
     @Transactional
@@ -115,6 +122,11 @@ public class DeliveryApplicationService {
         attempt.setErrorCode(null);
         attempt.setErrorMessage(null);
 
+        long creditCost = costForCredits(request.channel(), recipients.size());
+        if (creditCost > 0) {
+            walletService.charge(companyId, request.attemptId(), creditCost);
+        }
+
         try {
             DeliveryAttemptEntity savedAttempt = deliveryAttemptRepository.save(attempt);
             DeliveryEventEntity queuedEvent = createQueuedEvent(savedAttempt);
@@ -137,6 +149,18 @@ public class DeliveryApplicationService {
         event.setEventType(DeliveryEventType.QUEUED);
         event.setEventAtUtc(nowUtcMicros());
         return event;
+    }
+
+    private long costForCredits(Channel channel, int recipients) {
+        if (!creditsProperties.isEnabled()) {
+            return 0;
+        }
+        long perRecipient = switch (channel) {
+            case SMS -> creditsProperties.getSmsCost();
+            case WHATSAPP -> creditsProperties.getWhatsappCost();
+            default -> creditsProperties.getEmailCost();
+        };
+        return perRecipient * recipients;
     }
 
     private DeliveryAttemptEntity findOrCreateAttempt(String companyId,

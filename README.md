@@ -8,6 +8,7 @@ Spring Boot 3 (Java 21) Delivery Gateway Service.
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (MariaDB connection)
 - `JWT_JWK_SET_URI` (URL to expose JWKs for JWT validation)
 - `EMAIL_*` variables for SMTP (optional)
+- `CREDITS_ENABLED`, `SMS_COST`, `WHATSAPP_COST`, `EMAIL_COST` (prepaid wallet configuration)
 
 ## Running Locally
 
@@ -44,5 +45,17 @@ curl -X POST http://localhost:8106/api/v1/deliveries \
 
 ```bash
 curl http://localhost:8106/api/v1/deliveries/att-123 \
+  -H "Authorization: Bearer <dummy-jwt>"
+```
+
+```bash
+curl -X POST http://localhost:8106/api/v1/wallet/topups \
+  -H "Authorization: Bearer <dummy-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":5}'
+```
+
+```bash
+curl http://localhost:8106/api/v1/wallet \
   -H "Authorization: Bearer <dummy-jwt>"
 ```

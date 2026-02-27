@@ -56,6 +56,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .body(buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage(), request, null));
     }
 
+    @ExceptionHandler(InsufficientCreditsException.class)
+    public ResponseEntity<ErrorResponse> handleInsufficientCredits(InsufficientCreditsException ex,
+                                                                    HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(buildErrorResponse(HttpStatus.CONFLICT, ex.getMessage(), request, null));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpectedException(Exception ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -3,6 +3,7 @@ package de.innologic.delivery.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.innologic.delivery.api.dto.DeliveryContentDto;
 import de.innologic.delivery.api.dto.DeliveryRequest;
+import de.innologic.delivery.config.CreditsProperties;
 import de.innologic.delivery.domain.Channel;
 import de.innologic.delivery.domain.DeliveryAttemptEntity;
 import de.innologic.delivery.persistence.DeliveryAttemptRepository;
@@ -18,8 +19,6 @@ import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,6 +31,10 @@ class DeliveryApplicationServiceTest {
     private DeliveryEventRepository deliveryEventRepository;
     @Mock
     private DeliveryEventForwarder deliveryEventForwarder;
+    @Mock
+    private WalletService walletService;
+    @Mock
+    private CreditsProperties creditsProperties;
 
     private DeliveryApplicationService service;
 
@@ -41,11 +44,14 @@ class DeliveryApplicationServiceTest {
                 deliveryAttemptRepository,
                 deliveryEventRepository,
                 deliveryEventForwarder,
-                new ObjectMapper()
+                new ObjectMapper(),
+                walletService,
+                creditsProperties
         );
         when(deliveryAttemptRepository.findByCompanyIdAndAttemptId(any(), any())).thenReturn(java.util.Optional.empty());
         when(deliveryAttemptRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(deliveryEventRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(creditsProperties.isEnabled()).thenReturn(false);
     }
 
     @Test

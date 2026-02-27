@@ -149,9 +149,13 @@ public class DeliveryEventEntity {
     @PrePersist
     void onCreate() {
         if (createdAtUtc == null) {
-            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-            int micros = now.getNano() / 1_000;
-            createdAtUtc = now.withNano(micros * 1_000);
+            createdAtUtc = nowUtcMicros();
         }
+    }
+
+    private OffsetDateTime nowUtcMicros() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        int micros = now.getNano() / 1_000;
+        return now.withNano(micros * 1_000);
     }
 }

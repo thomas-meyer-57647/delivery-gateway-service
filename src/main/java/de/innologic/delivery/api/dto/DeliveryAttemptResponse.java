@@ -7,17 +7,19 @@ import de.innologic.delivery.domain.DeliveryStatus;
 import java.time.OffsetDateTime;
 import java.util.List;
 
-public record DeliveryReceipt(
+public record DeliveryAttemptResponse(
         String attemptId,
         Channel channel,
         DeliveryMode deliveryMode,
         List<String> to,
+        String subject,
         DeliveryStatus state,
         String providerMessageId,
         String errorCode,
         String errorMessage,
         String correlationId,
         OffsetDateTime createdAtUtc,
-        OffsetDateTime updatedAtUtc
+        OffsetDateTime updatedAtUtc,
+        List<DeliveryEventResponse> events
 ) {
 }

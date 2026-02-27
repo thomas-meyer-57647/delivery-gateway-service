@@ -1,31 +1,48 @@
 # delivery-gateway-service
 
-Spring Boot 3 (Java 21) Service fuer Delivery-Gateway-Funktionen.
+Spring Boot 3 (Java 21) Delivery Gateway Service.
 
-## Swagger / OpenAPI
+## Environment Variables
 
-- Swagger UI: `http://localhost:8080/swagger-ui`
-- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+- `SERVER_PORT` (default `8106` when running in Docker/local container)
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (MariaDB connection)
+- `JWT_JWK_SET_URI` (URL to expose JWKs for JWT validation)
+- `EMAIL_*` variables for SMTP (optional)
 
-Hinweis: Die Endpunkte sind nur erreichbar, wenn der Service lokal laeuft.
-
-## Docker Compose
-
-### Start
+## Running Locally
 
 ```bash
-docker compose up -d --build
+mvn -q clean test
 ```
 
-### Stop
-
 ```bash
-docker compose down
+docker compose up --build
 ```
 
-### Reset (DB + Container + Rebuild)
+## API
+
+- Swagger UI: `http://localhost:8106/swagger-ui`
+- OpenAPI: `http://localhost:8106/v3/api-docs`
+
+### Example CURLs (replace `<jwt>` with your JWT)
 
 ```bash
-docker compose down -v --remove-orphans
-docker compose up -d --build
+curl -X POST http://localhost:8106/api/v1/deliveries \
+  -H "Authorization: Bearer <dummy-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "attemptId": "att-123",
+    "channel": "EMAIL",
+    "to": "user@example.com, user2@example.com",
+    "deliveryMode": "INDIVIDUAL",
+    "subject": "Hello",
+    "content": {
+      "text": "You have a message"
+    }
+  }'
+```
+
+```bash
+curl http://localhost:8106/api/v1/deliveries/att-123 \
+  -H "Authorization: Bearer <dummy-jwt>"
 ```

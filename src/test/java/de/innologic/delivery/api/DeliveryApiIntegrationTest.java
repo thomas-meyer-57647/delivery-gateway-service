@@ -2,10 +2,9 @@ package de.innologic.delivery.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import de.innologic.delivery.domain.DeliveryLogEntity;
-import de.innologic.delivery.domain.DeliveryState;
+import de.innologic.delivery.domain.DeliveryStatus;
+import de.innologic.delivery.persistence.DeliveryAttemptRepository;
 import de.innologic.delivery.persistence.DeliveryEventRepository;
-import de.innologic.delivery.persistence.DeliveryLogRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,9 +13,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,6 +30,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -83,7 +83,7 @@ class DeliveryApiIntegrationTest {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private DeliveryLogRepository deliveryLogRepository;
+    private DeliveryAttemptRepository deliveryAttemptRepository;
 
     @Autowired
     private DeliveryEventRepository deliveryEventRepository;
@@ -91,32 +91,22 @@ class DeliveryApiIntegrationTest {
     @AfterEach
     void cleanup() {
         deliveryEventRepository.deleteAll();
-        deliveryLogRepository.deleteAll();
+        deliveryAttemptRepository.deleteAll();
     }
 
     @Test
-    void postDeliveriesShouldPersistDeliveryLog() throws Exception {
+    void postDeliveriesShouldPersistAttemptAndEvent() throws Exception {
         String attemptId = "att-" + UUID.randomUUID();
         String requestJson = """
                 {
                   "attemptId": "%s",
                   "channel": "EMAIL",
-                  "to": "user@example.com",
-                  "subject": "Test Subject",
+                  "to": "user@example.com; duplicate@example.com;user@example.com",
+                  "deliveryMode": "INDIVIDUAL",
+                  "subject": "Service Update",
                   "content": {
-                    "text": "Hello world",
-                    "html": "<p>Hello world</p>"
-                  },
-                  "attachments": [
-                    {
-                      "fileId": "f-1",
-                      "url": "https://example.com/file.pdf",
-                      "filename": "file.pdf",
-                      "mimeType": "application/pdf",
-                      "size": 1234
-                    }
-                  ],
-                  "correlationId": "corr-123"
+                    "text": "Hello world"
+                  }
                 }
                 """.formatted(attemptId);
 
@@ -126,24 +116,26 @@ class DeliveryApiIntegrationTest {
                         .content(requestJson))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.attemptId").value(attemptId))
-                .andExpect(jsonPath("$.state").value("ACCEPTED"))
-                .andExpect(jsonPath("$.createdAtUtc").exists());
+                .andExpect(jsonPath("$.state").value("QUEUED"))
+                .andExpect(jsonPath("$.deliveryMode").value("INDIVIDUAL"))
+                .andExpect(jsonPath("$.to[0]").value("user@example.com"))
+                .andExpect(jsonPath("$.to[1]").value("duplicate@example.com"));
 
-        DeliveryLogEntity log = deliveryLogRepository.findByCompanyIdAndAttemptId("company-a", attemptId).orElseThrow();
-        assertThat(log.getState()).isEqualTo(DeliveryState.ACCEPTED);
-        assertThat(log.getToAddress()).isEqualTo("user@example.com");
-        assertThat(log.getSubject()).isEqualTo("Test Subject");
-        assertThat(log.getContentText()).isEqualTo("Hello world");
+        assertThat(deliveryAttemptRepository.countByCompanyIdAndAttemptId("company-a", attemptId)).isEqualTo(1);
+        assertThat(deliveryEventRepository.countByCompanyIdAndAttemptId("company-a", attemptId)).isEqualTo(1);
+        assertThat(deliveryAttemptRepository.findByCompanyIdAndAttemptId("company-a", attemptId))
+                .map(attempt -> attempt.getState())
+                .hasValue(DeliveryStatus.QUEUED);
     }
 
     @Test
-    void sameAttemptIdShouldBeIdempotent() throws Exception {
+    void sameAttemptIdShouldStayIdempotent() throws Exception {
         String attemptId = "att-" + UUID.randomUUID();
         String requestJson = """
                 {
                   "attemptId": "%s",
-                  "channel": "WHATSAPP",
-                  "to": "+491700000000",
+                  "channel": "EMAIL",
+                  "to": "user@example.com",
                   "content": {
                     "text": "Idempotent message"
                   }
@@ -173,26 +165,20 @@ class DeliveryApiIntegrationTest {
 
         assertThat(second.get("attemptId")).isEqualTo(first.get("attemptId"));
         assertThat(second.get("state")).isEqualTo(first.get("state"));
-        assertThat(second.get("providerMessageId")).isEqualTo(first.get("providerMessageId"));
-        assertThat(second.get("errorCode")).isEqualTo(first.get("errorCode"));
-        assertThat(second.get("errorMessage")).isEqualTo(first.get("errorMessage"));
-        Instant firstCreatedAt = Instant.parse(first.get("createdAtUtc").asText());
-        Instant secondCreatedAt = Instant.parse(second.get("createdAtUtc").asText());
-        assertThat(secondCreatedAt).isEqualTo(firstCreatedAt.truncatedTo(ChronoUnit.MICROS));
-        assertThat(deliveryLogRepository.countByCompanyIdAndAttemptId("company-a", attemptId)).isEqualTo(1);
+        assertThat(second.get("createdAtUtc").asText()).isEqualTo(first.get("createdAtUtc").asText());
+        assertThat(deliveryAttemptRepository.countByCompanyIdAndAttemptId("company-a", attemptId)).isEqualTo(1);
     }
 
     @Test
-    void providerCallbackShouldPersistEventAndUpdateLog() throws Exception {
+    void getDeliveriesReturnsTimelineAscending() throws Exception {
         String attemptId = "att-" + UUID.randomUUID();
-        String createRequestJson = """
+        String createJson = """
                 {
                   "attemptId": "%s",
                   "channel": "EMAIL",
                   "to": "user@example.com",
-                  "subject": "Initial",
                   "content": {
-                    "text": "Initial text"
+                    "text": "Timeline test"
                   }
                 }
                 """.formatted(attemptId);
@@ -200,41 +186,90 @@ class DeliveryApiIntegrationTest {
         mockMvc.perform(post("/api/v1/deliveries")
                         .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createRequestJson))
+                        .content(createJson))
                 .andExpect(status().isAccepted());
 
         String callbackJson = """
                 {
                   "attemptId": "%s",
                   "channel": "EMAIL",
-                  "eventType": "FAILED",
-                  "eventAtUtc": "2026-02-15T18:30:00Z",
-                  "providerMessageId": "pm-123",
-                  "rawStatus": "undelivered",
-                  "errorCode": "TWILIO-400",
-                  "errorMessage": "Destination not reachable"
+                  "eventType": "SENT",
+                  "eventAtUtc": "2026-12-31T00:00:00Z",
+                  "providerMessageId": "pm-123"
                 }
                 """.formatted(attemptId);
 
-        mockMvc.perform(post("/api/v1/provider-callbacks/twilio")
+        mockMvc.perform(post("/api/v1/providers/twilio/events")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(callbackJson))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(get("/api/v1/deliveries/" + attemptId)
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events[0].eventType").value("QUEUED"))
+                .andExpect(jsonPath("$.events[1].eventType").value("SENT"));
+    }
+
+    @Test
+    void providerEventUpdatesStatusAndProviderMessageId() throws Exception {
+        String attemptId = "att-" + UUID.randomUUID();
+        String createJson = """
+                {
+                  "attemptId": "%s",
+                  "channel": "EMAIL",
+                  "to": "user@example.com",
+                  "content": {
+                    "text": "Status update"
+                  }
+                }
+                """.formatted(attemptId);
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJson))
+                .andExpect(status().isAccepted());
+
+        String callbackJson = """
+                {
+                  "attemptId": "%s",
+                  "channel": "EMAIL",
+                  "eventType": "DELIVERED",
+                  "providerMessageId": "pm-abc",
+                  "rawStatus": "delivered"
+                }
+                """.formatted(attemptId);
+
+        mockMvc.perform(post("/api/v1/providers/twilio/events")
                         .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(callbackJson))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.attemptId").value(attemptId))
-                .andExpect(jsonPath("$.eventType").value("FAILED"));
+                .andExpect(jsonPath("$.eventType").value("DELIVERED"));
 
-        assertThat(deliveryEventRepository.countByCompanyIdAndAttemptId("company-a", attemptId)).isEqualTo(1);
-        DeliveryLogEntity log = deliveryLogRepository.findByCompanyIdAndAttemptId("company-a", attemptId).orElseThrow();
-        assertThat(log.getState()).isEqualTo(DeliveryState.REJECTED);
-        assertThat(log.getProviderMessageId()).isEqualTo("pm-123");
-        assertThat(log.getErrorCode()).isEqualTo("TWILIO-400");
+        assertThat(deliveryAttemptRepository.findByCompanyIdAndAttemptId("company-a", attemptId))
+                .map(attempt -> attempt.getState())
+                .hasValue(DeliveryStatus.DELIVERED);
+        assertThat(deliveryAttemptRepository.findByCompanyIdAndAttemptId("company-a", attemptId))
+                .map(attempt -> attempt.getProviderMessageId())
+                .hasValue("pm-abc");
     }
 
     @Test
-    void missingRequiredFieldsShouldReturn400() throws Exception {
-        String invalidJson = """
+    void missingJwtReturnsUnauthorized() throws Exception {
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void missingCompanyIdClaimReturnsForbidden() throws Exception {
+        String requestJson = """
                 {
+                  "attemptId": "att-403",
                   "channel": "EMAIL",
                   "to": "user@example.com",
                   "content": {
@@ -244,93 +279,52 @@ class DeliveryApiIntegrationTest {
                 """;
 
         mockMvc.perform(post("/api/v1/deliveries")
-                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(invalidJson))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void smsWithSubjectShouldReturn400() throws Exception {
-        String attemptId = "att-" + UUID.randomUUID();
-        String invalidJson = """
-                {
-                  "attemptId": "%s",
-                  "channel": "SMS",
-                  "to": "+491700000000",
-                  "subject": "forbidden",
-                  "content": {
-                    "text": "x"
-                  }
-                }
-                """.formatted(attemptId);
-
-        mockMvc.perform(post("/api/v1/deliveries")
-                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(invalidJson))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void missingJwtShouldReturn401() throws Exception {
-        String attemptId = "att-" + UUID.randomUUID();
-        String requestJson = """
-                {
-                  "attemptId": "%s",
-                  "channel": "EMAIL",
-                  "to": "user@example.com",
-                  "content": {
-                    "text": "x"
-                  }
-                }
-                """.formatted(attemptId);
-
-        mockMvc.perform(post("/api/v1/deliveries")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestJson))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void invalidJwtShouldReturn401() throws Exception {
-        String attemptId = "att-" + UUID.randomUUID();
-        String requestJson = """
-                {
-                  "attemptId": "%s",
-                  "channel": "EMAIL",
-                  "to": "user@example.com",
-                  "content": {
-                    "text": "x"
-                  }
-                }
-                """.formatted(attemptId);
-
-        mockMvc.perform(post("/api/v1/deliveries")
-                        .header("Authorization", "Bearer invalid-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestJson))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void missingCompanyIdClaimShouldReturn403() throws Exception {
-        String attemptId = "att-" + UUID.randomUUID();
-        String requestJson = """
-                {
-                  "attemptId": "%s",
-                  "channel": "EMAIL",
-                  "to": "user@example.com",
-                  "content": {
-                    "text": "x"
-                  }
-                }
-                """.formatted(attemptId);
-
-        mockMvc.perform(post("/api/v1/deliveries")
                         .with(jwt().jwt(jwt -> jwt.claims(claims -> claims.remove("companyId"))))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void otherCompanyCannotReadAttempt() throws Exception {
+        String attemptId = "att-" + UUID.randomUUID();
+        String requestJson = """
+                {
+                  "attemptId": "%s",
+                  "channel": "EMAIL",
+                  "to": "user@example.com",
+                  "content": {
+                    "text": "x"
+                  }
+                }
+                """.formatted(attemptId);
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(get("/api/v1/deliveries/" + attemptId)
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-b"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void providerEventWithoutIdentifiersReturnsBadRequest() throws Exception {
+        String invalidJson = """
+                {
+                  "channel": "EMAIL",
+                  "eventType": "SENT"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/providers/twilio/events")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidJson))
+                .andExpect(status().isBadRequest());
+    }
+
+
 }

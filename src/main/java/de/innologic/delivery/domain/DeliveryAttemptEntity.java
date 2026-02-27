@@ -11,13 +11,15 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
 @Entity
-@Table(name = "delivery_log")
-public class DeliveryLogEntity {
+@Table(name = "delivery_attempt",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"company_id", "attempt_id"}))
+public class DeliveryAttemptEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -33,7 +35,11 @@ public class DeliveryLogEntity {
     @Column(nullable = false, length = 20)
     private Channel channel;
 
-    @Column(name = "to_address", nullable = false, length = 255)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_mode", nullable = false, length = 20)
+    private DeliveryMode deliveryMode;
+
+    @Column(name = "to_address", nullable = false, length = 2000)
     private String toAddress;
 
     @Column(length = 255)
@@ -55,8 +61,8 @@ public class DeliveryLogEntity {
     private String requestCorrelationId;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private DeliveryState state;
+    @Column(name = "state", nullable = false, length = 20)
+    private DeliveryStatus state;
 
     @Column(name = "provider_message_id", length = 255)
     private String providerMessageId;
@@ -100,6 +106,14 @@ public class DeliveryLogEntity {
 
     public void setChannel(Channel channel) {
         this.channel = channel;
+    }
+
+    public DeliveryMode getDeliveryMode() {
+        return deliveryMode;
+    }
+
+    public void setDeliveryMode(DeliveryMode deliveryMode) {
+        this.deliveryMode = deliveryMode;
     }
 
     public String getToAddress() {
@@ -150,11 +164,11 @@ public class DeliveryLogEntity {
         this.requestCorrelationId = requestCorrelationId;
     }
 
-    public DeliveryState getState() {
+    public DeliveryStatus getState() {
         return state;
     }
 
-    public void setState(DeliveryState state) {
+    public void setState(DeliveryStatus state) {
         this.state = state;
     }
 
@@ -193,9 +207,6 @@ public class DeliveryLogEntity {
     @PrePersist
     void onCreate() {
         OffsetDateTime now = nowUtcMicros();
-        if (state == null) {
-            state = DeliveryState.UNKNOWN;
-        }
         createdAtUtc = now;
         updatedAtUtc = now;
     }

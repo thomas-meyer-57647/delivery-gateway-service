@@ -34,7 +34,8 @@ public class ApiAccessDeniedHandler implements AccessDeniedHandler {
                 HttpStatus.FORBIDDEN.getReasonPhrase(),
                 "Forbidden",
                 request.getRequestURI(),
-                resolveCorrelationId(request)
+                resolveCorrelationId(request),
+                null
         );
 
         response.setStatus(HttpStatus.FORBIDDEN.value());

@@ -34,7 +34,8 @@ public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
                 HttpStatus.UNAUTHORIZED.getReasonPhrase(),
                 "Unauthorized",
                 request.getRequestURI(),
-                resolveCorrelationId(request)
+                resolveCorrelationId(request),
+                null
         );
 
         response.setStatus(HttpStatus.UNAUTHORIZED.value());

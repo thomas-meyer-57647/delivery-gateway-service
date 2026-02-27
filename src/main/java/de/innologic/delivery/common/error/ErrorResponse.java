@@ -3,6 +3,7 @@ package de.innologic.delivery.common.error;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 @Schema(
         name = "ErrorResponse",
@@ -43,6 +44,12 @@ public record ErrorResponse(
                 description = "Korrelations-ID zur Nachverfolgung im Logging.",
                 example = "f9f5c6ce-3ba8-4ec8-a9c0-68266b8025b8"
         )
-        String correlationId
+        String correlationId,
+
+        @Schema(
+                description = "Felder mit Validierungsfehlern.",
+                example = "[{\"field\":\"to\",\"message\":\"must not be blank\"}]"
+        )
+        List<ApiFieldError> fieldErrors
 ) {
 }

@@ -1,6 +1,7 @@
 package de.innologic.delivery.api.dto;
 
 import de.innologic.delivery.domain.Channel;
+import de.innologic.delivery.domain.DeliveryMode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -31,6 +32,7 @@ class DeliveryRequestValidationTest {
                 null,
                 null,
                 null,
+                null,
                 null
         );
 
@@ -47,6 +49,7 @@ class DeliveryRequestValidationTest {
                 "att-123",
                 Channel.EMAIL,
                 "user@example.com",
+                DeliveryMode.SINGLE,
                 "Subject",
                 new DeliveryContentDto("Hello", "<p>Hello</p>"),
                 null,

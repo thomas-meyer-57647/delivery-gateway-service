@@ -26,11 +26,12 @@ services:
       DB_NAME: deliveries
       DB_USER: root
       DB_PASSWORD: ""
+      SERVER_PORT: 8106
     depends_on:
       mariadb:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8106:8106"
 
 volumes:
   mariadb_data:

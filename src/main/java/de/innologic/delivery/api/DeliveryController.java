@@ -1,5 +1,6 @@
 package de.innologic.delivery.api;
 
+import de.innologic.delivery.api.dto.DeliveryAttemptResponse;
 import de.innologic.delivery.api.dto.DeliveryReceipt;
 import de.innologic.delivery.api.dto.DeliveryRequest;
 import de.innologic.delivery.common.security.CompanyIdResolver;
@@ -10,6 +11,8 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,5 +40,12 @@ public class DeliveryController {
         String companyId = companyIdResolver.resolveRequiredCompanyId(jwt);
         String correlationId = (String) servletRequest.getAttribute(CorrelationIdFilter.CORRELATION_ID_ATTRIBUTE);
         return deliveryApplicationService.createDelivery(companyId, request, correlationId);
+    }
+
+    @GetMapping("/{attemptId}")
+    public DeliveryAttemptResponse get(@PathVariable String attemptId,
+                                       @AuthenticationPrincipal Jwt jwt) {
+        String companyId = companyIdResolver.resolveRequiredCompanyId(jwt);
+        return deliveryApplicationService.getDeliveryAttempt(companyId, attemptId);
     }
 }

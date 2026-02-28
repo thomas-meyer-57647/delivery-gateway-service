@@ -1,5 +1,6 @@
 package de.innologic.delivery.api.dto;
 
+import de.innologic.delivery.api.dto.MetaDto;
 import de.innologic.delivery.domain.Channel;
 import de.innologic.delivery.domain.DeliveryMode;
 import de.innologic.delivery.domain.DeliveryStatus;
@@ -12,6 +13,9 @@ public record DeliveryAttemptResponse(
         Channel channel,
         DeliveryMode deliveryMode,
         List<String> to,
+        String provider,
+        String from,
+        MetaDto meta,
         String subject,
         DeliveryStatus state,
         String providerMessageId,

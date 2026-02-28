@@ -11,5 +11,7 @@ public interface DeliveryAttemptRepository extends JpaRepository<DeliveryAttempt
 
     Optional<DeliveryAttemptEntity> findByCompanyIdAndProviderMessageId(String companyId, String providerMessageId);
 
+    Optional<DeliveryAttemptEntity> findByCompanyIdAndIdempotencyKey(String companyId, String idempotencyKey);
+
     long countByCompanyIdAndAttemptId(String companyId, String attemptId);
 }

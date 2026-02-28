@@ -7,6 +7,7 @@ import de.innologic.delivery.api.dto.DeliveryEvent;
 import de.innologic.delivery.api.dto.DeliveryEventResponse;
 import de.innologic.delivery.api.dto.DeliveryReceipt;
 import de.innologic.delivery.api.dto.DeliveryRequest;
+import de.innologic.delivery.api.dto.MetaDto;
 import de.innologic.delivery.api.dto.ProviderEventRequest;
 import de.innologic.delivery.config.CreditsProperties;
 import de.innologic.delivery.common.error.BadRequestException;
@@ -58,12 +59,21 @@ public class DeliveryApplicationService {
     }
 
     @Transactional
-    public DeliveryReceipt createDelivery(String companyId, DeliveryRequest request, String headerCorrelationId) {
+    public DeliveryReceipt createDelivery(String companyId,
+                                          DeliveryRequest request,
+                                          String headerCorrelationId,
+                                          String idempotencyKey) {
         List<String> recipients = normalizeRecipients(request.to());
+        DeliveryAttemptEntity existing = findExistingAttempt(companyId, request.attemptId(), idempotencyKey);
+        if (existing != null) {
+            return toReceipt(existing, parseRecipients(existing.getToAddress()));
+        }
         DeliveryMode mode = DeliveryMode.resolve(request.deliveryMode());
-        return deliveryAttemptRepository.findByCompanyIdAndAttemptId(companyId, request.attemptId())
-                .map(attempt -> toReceipt(attempt, parseRecipients(attempt.getToAddress())))
-                .orElseGet(() -> createAttempt(companyId, request, recipients, mode, headerCorrelationId));
+        long creditCost = costForCredits(request.channel(), recipients.size());
+        if (creditCost > 0) {
+            walletService.charge(companyId, request.attemptId(), creditCost);
+        }
+        return createAttempt(companyId, request, recipients, mode, headerCorrelationId, idempotencyKey);
     }
 
     @Transactional
@@ -82,7 +92,7 @@ public class DeliveryApplicationService {
             throw new BadRequestException("attemptId or providerMessageId is required");
         }
         DeliveryAttemptEntity attempt = findOrCreateAttempt(companyId, provider, request, eventType);
-        updateAttemptFromEvent(attempt, request, eventType);
+        updateAttemptFromEvent(attempt, provider, request, eventType);
 
         DeliveryEventEntity eventEntity = new DeliveryEventEntity();
         eventEntity.setCompanyId(companyId);
@@ -105,7 +115,8 @@ public class DeliveryApplicationService {
                                           DeliveryRequest request,
                                           List<String> recipients,
                                           DeliveryMode mode,
-                                          String headerCorrelationId) {
+                                          String headerCorrelationId,
+                                          String idempotencyKey) {
         DeliveryAttemptEntity attempt = new DeliveryAttemptEntity();
         attempt.setCompanyId(companyId);
         attempt.setAttemptId(request.attemptId());
@@ -113,19 +124,18 @@ public class DeliveryApplicationService {
         attempt.setDeliveryMode(mode);
         attempt.setToAddress(String.join(";", recipients));
         attempt.setSubject(request.channel() == Channel.EMAIL ? request.subject() : null);
+        attempt.setProvider(request.provider());
+        attempt.setFromValue(request.from());
+        attempt.setMetaJson(serializeMeta(request.meta()));
         attempt.setContentText(request.content().text());
         attempt.setContentHtml(request.content().html());
         attempt.setAttachmentsJson(serializeAttachments(request.attachments()));
         attempt.setRequestCorrelationId(resolveCorrelationId(request.correlationId(), headerCorrelationId));
+        attempt.setIdempotencyKey(idempotencyKey);
         attempt.setState(DeliveryStatus.QUEUED);
         attempt.setProviderMessageId(null);
         attempt.setErrorCode(null);
         attempt.setErrorMessage(null);
-
-        long creditCost = costForCredits(request.channel(), recipients.size());
-        if (creditCost > 0) {
-            walletService.charge(companyId, request.attemptId(), creditCost);
-        }
 
         try {
             DeliveryAttemptEntity savedAttempt = deliveryAttemptRepository.save(attempt);
@@ -138,6 +148,14 @@ public class DeliveryApplicationService {
                     .map(existing -> toReceipt(existing, parseRecipients(existing.getToAddress())))
                     .orElseThrow(() -> ex);
         }
+    }
+
+    private DeliveryAttemptEntity findExistingAttempt(String companyId, String attemptId, String idempotencyKey) {
+        if (StringUtils.hasText(idempotencyKey)) {
+            return deliveryAttemptRepository.findByCompanyIdAndIdempotencyKey(companyId, idempotencyKey)
+                    .orElseGet(() -> deliveryAttemptRepository.findByCompanyIdAndAttemptId(companyId, attemptId).orElse(null));
+        }
+        return deliveryAttemptRepository.findByCompanyIdAndAttemptId(companyId, attemptId).orElse(null);
     }
 
     private DeliveryEventEntity createQueuedEvent(DeliveryAttemptEntity attempt) {
@@ -179,6 +197,7 @@ public class DeliveryApplicationService {
             attempt.setCompanyId(companyId);
             attempt.setAttemptId(StringUtils.hasText(request.attemptId()) ? request.attemptId() : request.providerMessageId());
             attempt.setChannel(request.channel());
+            attempt.setProvider(provider);
             attempt.setDeliveryMode(DeliveryMode.SINGLE);
             attempt.setToAddress("unknown");
             attempt.setContentText("callback-only");
@@ -190,9 +209,11 @@ public class DeliveryApplicationService {
     }
 
     private void updateAttemptFromEvent(DeliveryAttemptEntity attempt,
+                                        String provider,
                                         ProviderEventRequest request,
                                         DeliveryEventType eventType) {
         attempt.setChannel(request.channel());
+        attempt.setProvider(provider);
         if (StringUtils.hasText(request.providerMessageId())) {
             attempt.setProviderMessageId(request.providerMessageId());
         }
@@ -207,12 +228,16 @@ public class DeliveryApplicationService {
     }
 
     private DeliveryReceipt toReceipt(DeliveryAttemptEntity attempt, List<String> recipients) {
+        MetaDto meta = deserializeMeta(attempt.getMetaJson());
         return new DeliveryReceipt(
                 attempt.getAttemptId(),
                 attempt.getChannel(),
                 attempt.getDeliveryMode(),
                 recipients,
                 attempt.getState(),
+                attempt.getProvider(),
+                attempt.getFromValue(),
+                meta,
                 attempt.getProviderMessageId(),
                 attempt.getErrorCode(),
                 attempt.getErrorMessage(),
@@ -224,6 +249,7 @@ public class DeliveryApplicationService {
 
     private DeliveryAttemptResponse toAttemptResponse(DeliveryAttemptEntity attempt,
                                                       List<DeliveryEventEntity> events) {
+        MetaDto meta = deserializeMeta(attempt.getMetaJson());
         List<String> recipients = parseRecipients(attempt.getToAddress());
         List<DeliveryEventResponse> responses = events.stream()
                 .map(this::toEventResponse)
@@ -233,6 +259,9 @@ public class DeliveryApplicationService {
                 attempt.getChannel(),
                 attempt.getDeliveryMode(),
                 recipients,
+                attempt.getProvider(),
+                attempt.getFromValue(),
+                meta,
                 attempt.getSubject(),
                 attempt.getState(),
                 attempt.getProviderMessageId(),
@@ -256,6 +285,17 @@ public class DeliveryApplicationService {
                 entity.getErrorCode(),
                 entity.getErrorMessage()
         );
+    }
+
+    private MetaDto deserializeMeta(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(raw, MetaDto.class);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     private DeliveryEvent toForwardEvent(DeliveryEventEntity entity) {
@@ -318,6 +358,17 @@ public class DeliveryApplicationService {
             return objectMapper.writeValueAsString(attachments);
         } catch (JsonProcessingException e) {
             throw new BadRequestException("attachments cannot be serialized");
+        }
+    }
+
+    private String serializeMeta(MetaDto meta) {
+        if (meta == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(meta);
+        } catch (JsonProcessingException e) {
+            throw new BadRequestException("meta cannot be serialized");
         }
     }
 

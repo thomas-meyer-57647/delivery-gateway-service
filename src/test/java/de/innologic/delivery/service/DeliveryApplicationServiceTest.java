@@ -6,6 +6,7 @@ import de.innologic.delivery.api.dto.DeliveryRequest;
 import de.innologic.delivery.config.CreditsProperties;
 import de.innologic.delivery.domain.Channel;
 import de.innologic.delivery.domain.DeliveryAttemptEntity;
+import de.innologic.delivery.domain.DeliveryMode;
 import de.innologic.delivery.persistence.DeliveryAttemptRepository;
 import de.innologic.delivery.persistence.DeliveryEventRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,13 +62,16 @@ class DeliveryApplicationServiceTest {
                 Channel.EMAIL,
                 "foo@example.com;bar@example.com;foo@example.com",
                 null,
+                null,
+                DeliveryMode.SINGLE,
                 "Subject",
                 new DeliveryContentDto("text", null),
+                Collections.emptyList(),
                 null,
                 null
         );
 
-        var response = service.createDelivery("company-a", request, "corr-id");
+        var response = service.createDelivery("company-a", request, "corr-id", null);
 
         assertThat(response.to()).containsExactly("foo@example.com", "bar@example.com");
     }
@@ -79,13 +83,16 @@ class DeliveryApplicationServiceTest {
                 Channel.SMS,
                 "+491700000000",
                 null,
+                null,
+                DeliveryMode.SINGLE,
                 "should be ignored",
                 new DeliveryContentDto("text", null),
+                Collections.emptyList(),
                 null,
                 null
         );
 
-        service.createDelivery("company-a", request, null);
+        service.createDelivery("company-a", request, null, null);
 
         ArgumentCaptor<DeliveryAttemptEntity> attemptCaptor = ArgumentCaptor.forClass(DeliveryAttemptEntity.class);
         verify(deliveryAttemptRepository).save(attemptCaptor.capture());
@@ -103,12 +110,15 @@ class DeliveryApplicationServiceTest {
                 "user@example.com",
                 null,
                 null,
+                DeliveryMode.SINGLE,
+                null,
                 new DeliveryContentDto("text", null),
                 Collections.emptyList(),
+                null,
                 null
         );
 
-        service.createDelivery("company-a", request, null);
+        service.createDelivery("company-a", request, null, null);
 
         ArgumentCaptor<DeliveryAttemptEntity> attemptCaptor = ArgumentCaptor.forClass(DeliveryAttemptEntity.class);
         verify(deliveryAttemptRepository).save(attemptCaptor.capture());

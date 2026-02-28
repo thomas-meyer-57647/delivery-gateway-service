@@ -417,12 +417,14 @@ class DeliveryApiIntegrationTest {
 
         mockMvc.perform(post("/api/v1/deliveries")
                         .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .header("Idempotency-Key", "idem-" + attemptId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(smsRequest))
                 .andExpect(status().isAccepted());
 
         mockMvc.perform(post("/api/v1/deliveries")
                         .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .header("Idempotency-Key", "idem-" + attemptId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(smsRequest))
                 .andExpect(status().isAccepted());
@@ -434,6 +436,63 @@ class DeliveryApiIntegrationTest {
 
         assertThat(walletLedgerRepository.countByCompanyIdAndAttemptIdAndType("company-a", attemptId, WalletLedgerType.DEBIT))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void attachmentBase64Accepted() throws Exception {
+        String attemptId = "att-" + UUID.randomUUID();
+        String requestJson = """
+                {
+                  "attemptId": "%s",
+                  "channel": "EMAIL",
+                  "to": "user@example.com",
+                  "content": {
+                    "text": "attach test"
+                  },
+                  "attachments": [
+                    {
+                      "filename": "hello.txt",
+                      "mimeType": "text/plain",
+                      "size": 5,
+                      "base64": "SGVsbG8="
+                    }
+                  ]
+                }
+                """.formatted(attemptId);
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson))
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void attachmentBase64RejectedWhenInvalid() throws Exception {
+        String requestJson = """
+                {
+                  "attemptId": "att-invalid-attach",
+                  "channel": "EMAIL",
+                  "to": "user@example.com",
+                  "content": {
+                    "text": "attach fail"
+                  },
+                  "attachments": [
+                    {
+                      "filename": "broken.txt",
+                      "mimeType": "text/plain",
+                      "size": 5,
+                      "base64": "!!!"
+                    }
+                  ]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/deliveries")
+                        .with(jwt().jwt(jwt -> jwt.claim("companyId", "company-a")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

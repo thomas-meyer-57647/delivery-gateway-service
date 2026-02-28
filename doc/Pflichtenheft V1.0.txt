@@ -187,6 +187,36 @@ Response 202 – DeliveryReceipt
   "correlationId": "corr-..."
 }
 
+6.5 GET /api/v1/wallet – WalletBalanceResponse
+Header
+Authorization: Bearer <JWT>
+X-Correlation-Id (optional, wird durchs Request-Handling durchgereicht)
+Response 200
+{
+  "companyId": "company-a",
+  "balance": 42
+}
+Hinweis: Der Header `companyId`-Claim steuert die Mandantenzuordnung; fehlt er, antwortet D mit 403, ohne Zugriff auf andere Mandanten.
+
+6.6 POST /api/v1/wallet/topups – WalletTopupRequest
+Header
+Authorization: Bearer <JWT>
+X-Correlation-Id (optional)
+Body
+{
+  "amount": 5
+}
+Response 200 – WalletBalanceResponse
+{
+  "companyId": "company-a",
+  "balance": 47
+}
+Fehlerfälle
+- 400 bei fehlendem oder kleinem `amount` (<=0)
+- 401 ohne JWT
+- 403 ohne `companyId`-Claim
+Topups schreiben einen Ledger-Eintrag vom Typ `TOPUP` in `wallet_ledger` und aktualisieren `tenant_wallet.balance`.
+
 6.2 GET /api/v1/deliveries/{attemptId} – AttemptStatusResponse
 Response 200
 {
@@ -246,6 +276,8 @@ Implementationshinweis: du setzt mindestens eine Unique-Regel in der DB. Viele T
 delivery_attempt
 delivery_event
 optional outbox_event (wenn Worker/Outbox Pattern genutzt wird)
+tenant_wallet
+wallet_ledger
 
 7.2 Wesentliche Felder
 delivery_attempt
@@ -279,6 +311,18 @@ error_code, error_message (nullable)
 raw_payload_json (optional, wenn erlaubt)
 created_at_utc
 
+tenant_wallet
+company_id (PK)
+balance
+updated_at_utc
+wallet_ledger
+id (PK)
+company_id
+attempt_id (nullable)
+type (TOPUP/DEBIT)
+amount
+created_at_utc
+
 7.3 Indizes / Constraints
 Unique (mindestens eins):
 UNIQUE(company_id, attempt_id) oder
@@ -288,6 +332,8 @@ Index:
 (company_id, attempt_id)
 provider_message_id (für Callback-Join)
 (attempt_id, event_at_utc) (Timeline)
+wallet_ledger
+(company_id, attempt_id)
 
 8. Verarbeitung / Ablauf (intern)
 8.1 Synchronous oder Asynchronous
@@ -337,6 +383,15 @@ DB Passwort
 JWT_JWK_SET_URI
 http://localhost:9000/oauth2/jwks
 JWKS URL
+
+9.3 Credits / Wallet
+Service D führt ein einfaches Prepaid-Wallet pro Tenant:
+- `GET /api/v1/wallet` gibt `{companyId,balance}` zurück und benötigt einen validen JWT mit `companyId`.
+- `POST /api/v1/wallet/topups` akzeptiert `{amount}` (positiv) und bucht den Betrag; historisierte Ledger-Einträge (`wallet_ledger`) protokollieren Topups und spätere Debits.
+> Das Wallet speichert `tenant_wallet.balance` + `wallet_ledger` (TOPUP/DEBIT) und alle Buchungen bleiben im selben Tenant.
+- Bei `POST /api/v1/deliveries` fallen sms-/whatsapp-spezifische Kosten an (`recipientsCount * COST`). Ist der Saldo zu gering, antwortet D mit `409 INSUFFICIENT_CREDITS` und schreibt keine Attempt/Events.
+- Das Wallet wird pro Tenant über ENV-Variablen `CREDITS_ENABLED`, `SMS_COST`, `WHATSAPP_COST`, `EMAIL_COST` gesteuert (Defaultwerte siehe oben). Wird `CREDITS_ENABLED=false` gesetzt, entstehen keine Debits; Rechnungsdaten bleiben erhalten (Ledger).
+- Idempotente Versuche (per `attemptId` oder `Idempotency-Key`) dürfen die Salden nur einmal belasten, weil `(companyId, attemptId)` und `(companyId, idempotency_key)` unique sind.
 
 Provider (optional, je nach Adapter-Implementierung)
 ENV

@@ -1,5 +1,6 @@
 package de.innologic.delivery.api.dto;
 
+import de.innologic.delivery.api.dto.MetaDto;
 import de.innologic.delivery.domain.Channel;
 import de.innologic.delivery.domain.DeliveryMode;
 import jakarta.validation.ConstraintViolation;
@@ -9,6 +10,8 @@ import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +36,9 @@ class DeliveryRequestValidationTest {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
                 null
         );
 
@@ -49,10 +55,13 @@ class DeliveryRequestValidationTest {
                 "att-123",
                 Channel.EMAIL,
                 "user@example.com",
+                "provider-a",
+                "noreply@example.com",
                 DeliveryMode.SINGLE,
                 "Subject",
                 new DeliveryContentDto("Hello", "<p>Hello</p>"),
-                null,
+                Collections.emptyList(),
+                new MetaDto("ref", List.of("tag")),
                 "corr-1"
         );
 

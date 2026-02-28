@@ -18,7 +18,10 @@ import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "delivery_attempt",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"company_id", "attempt_id"}))
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = {"company_id", "attempt_id"}),
+                @UniqueConstraint(columnNames = {"company_id", "idempotency_key"})
+        })
 public class DeliveryAttemptEntity {
 
     @Id
@@ -44,6 +47,19 @@ public class DeliveryAttemptEntity {
 
     @Column(length = 255)
     private String subject;
+
+    @Column(length = 100)
+    private String provider;
+
+    @Column(name = "from_value", length = 255)
+    private String fromValue;
+
+    @Lob
+    @Column(name = "meta_json", columnDefinition = "TEXT")
+    private String metaJson;
+
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
 
     @Lob
     @Column(name = "content_text", nullable = false, columnDefinition = "TEXT")
@@ -130,6 +146,38 @@ public class DeliveryAttemptEntity {
 
     public void setSubject(String subject) {
         this.subject = subject;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
+    }
+
+    public String getFromValue() {
+        return fromValue;
+    }
+
+    public void setFromValue(String fromValue) {
+        this.fromValue = fromValue;
+    }
+
+    public String getMetaJson() {
+        return metaJson;
+    }
+
+    public void setMetaJson(String metaJson) {
+        this.metaJson = metaJson;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
     }
 
     public String getContentText() {

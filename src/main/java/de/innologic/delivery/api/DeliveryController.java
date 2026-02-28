@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,10 +37,11 @@ public class DeliveryController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public DeliveryReceipt create(@Valid @RequestBody DeliveryRequest request,
                                   @AuthenticationPrincipal Jwt jwt,
-                                  HttpServletRequest servletRequest) {
+                                  HttpServletRequest servletRequest,
+                                  @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         String companyId = companyIdResolver.resolveRequiredCompanyId(jwt);
         String correlationId = (String) servletRequest.getAttribute(CorrelationIdFilter.CORRELATION_ID_ATTRIBUTE);
-        return deliveryApplicationService.createDelivery(companyId, request, correlationId);
+        return deliveryApplicationService.createDelivery(companyId, request, correlationId, idempotencyKey);
     }
 
     @GetMapping("/{attemptId}")
